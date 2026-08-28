@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Invue\Forms\FormsServiceProvider;
+use Invue\Panels\PanelsServiceProvider;
 
 /**
  * Wires the pieces Getting Started otherwise has you edit by hand:
@@ -422,10 +423,81 @@ class InstallCommand extends Command
             return true;
         }
 
-        // Deliberately not invue/panels' PanelLayout — this runs from
-        // invue:install, before make:invue-panel, so panels may not even
-        // be installed yet. Just somewhere real to land after login.
-        $stub = <<<'VUE'
+        // Same runtime-detection reasoning as the login page: invue/core
+        // can't composer-depend on invue/panels (wrong direction), but if
+        // it's already installed, wrap the dashboard in a real
+        // PanelLayout (Sidebar + Topbar) instead of a bare page — Sidebar
+        // and Topbar both fall back to an empty/default state when there's
+        // no real Panel behind this route yet (nothing shared invuePanel.*
+        // props), the same "empty until you add resources" shell a fresh
+        // filament:install --panels gives you.
+        $stub = class_exists(PanelsServiceProvider::class)
+            ? $this->dashboardPageWithPanelLayout()
+            : $this->dashboardPagePlain();
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function dashboardPageWithPanelLayout(): string
+    {
+        // Sidebar/Topbar directly, not <PanelLayout> — PanelLayout renders
+        // a bare <Sidebar /> with no way to pass it props, and this route
+        // isn't inside any real Panel's route group (no shared
+        // invuePanel.navigation), so it would show an empty nav with
+        // nothing in it, not even a link back to this page. An explicit
+        // items array is Sidebar's own documented standalone-mode escape
+        // hatch for exactly this.
+        return <<<'VUE'
+        <script setup>
+        import { router } from '@inertiajs/vue3'
+        import { Sidebar, Topbar } from 'invue/panels'
+
+        defineProps({
+            user: Object,
+        })
+
+        const items = [{ label: 'Dashboard', icon: 'layout-dashboard', url: '/dashboard' }]
+
+        function logout() {
+            router.post('/logout')
+        }
+        </script>
+
+        <template>
+            <div class="invue-panel flex min-h-screen bg-gray-50">
+                <Sidebar :items="items" />
+
+                <div class="flex flex-1 flex-col">
+                    <Topbar>
+                        <button type="button" class="text-sm text-gray-500 hover:text-gray-700" @click="logout">
+                            Log out
+                        </button>
+                    </Topbar>
+
+                    <main class="flex-1 p-6">
+                        <h1 class="text-xl font-semibold text-gray-900">Dashboard</h1>
+
+                        <p class="mt-4 text-gray-600">You're logged in as {{ user.email }}.</p>
+
+                        <p class="mt-2 text-sm text-gray-500">
+                            Run
+                            <code class="rounded bg-gray-100 px-1.5 py-0.5">php artisan make:invue-resource {Model}</code>
+                            for a real CRUD screen — see the Creating Resources page.
+                        </p>
+                    </main>
+                </div>
+            </div>
+        </template>
+
+        VUE;
+    }
+
+    protected function dashboardPagePlain(): string
+    {
+        return <<<'VUE'
         <script setup>
         import { router } from '@inertiajs/vue3'
 
@@ -462,11 +534,6 @@ class InstallCommand extends Command
         </template>
 
         VUE;
-
-        $this->files->ensureDirectoryExists(dirname($path));
-        $this->files->put($path, $stub);
-
-        return true;
     }
 
     protected function writeDashboardRoute(): bool
