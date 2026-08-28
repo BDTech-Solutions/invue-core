@@ -145,6 +145,8 @@ class InstallCommand extends Command
         $this->components->task('Creating routes/auth.php', fn () => $this->writeAuthRoutes());
         $this->components->task('Requiring routes/auth.php from routes/web.php', fn () => $this->registerAuthRoutes());
         $this->components->task('Creating resources/js/pages/auth/Login.vue', fn () => $this->writeLoginPage());
+        $this->components->task('Creating resources/js/pages/Dashboard.vue', fn () => $this->writeDashboardPage());
+        $this->components->task('Adding the /dashboard route', fn () => $this->writeDashboardRoute());
 
         $credentials = $this->createTestUser();
 
@@ -197,7 +199,7 @@ class InstallCommand extends Command
 
                 $request->session()->regenerate();
 
-                return redirect()->intended('/');
+                return redirect()->intended('/dashboard');
             }
 
             public function destroy(Request $request): RedirectResponse
@@ -410,6 +412,99 @@ class InstallCommand extends Command
         </template>
 
         VUE;
+    }
+
+    protected function writeDashboardPage(): bool
+    {
+        $path = resource_path('js/pages/Dashboard.vue');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        // Deliberately not invue/panels' PanelLayout — this runs from
+        // invue:install, before make:invue-panel, so panels may not even
+        // be installed yet. Just somewhere real to land after login.
+        $stub = <<<'VUE'
+        <script setup>
+        import { router } from '@inertiajs/vue3'
+
+        defineProps({
+            user: Object,
+        })
+
+        function logout() {
+            router.post('/logout')
+        }
+        </script>
+
+        <template>
+            <div class="min-h-screen bg-gray-50 p-8">
+                <div class="mx-auto max-w-2xl">
+                    <div class="flex items-center justify-between">
+                        <h1 class="text-xl font-semibold text-gray-900">Dashboard</h1>
+                        <button type="button" class="text-sm text-gray-500 hover:text-gray-700" @click="logout">
+                            Log out
+                        </button>
+                    </div>
+
+                    <p class="mt-4 text-gray-600">You're logged in as {{ user.email }}.</p>
+
+                    <p class="mt-2 text-sm text-gray-500">
+                        Run
+                        <code class="rounded bg-gray-100 px-1.5 py-0.5">php artisan make:invue-panel</code>
+                        to scaffold a real admin panel, then
+                        <code class="rounded bg-gray-100 px-1.5 py-0.5">php artisan make:invue-resource {Model}</code>
+                        for a CRUD screen — see the Creating Resources page.
+                    </p>
+                </div>
+            </div>
+        </template>
+
+        VUE;
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function writeDashboardRoute(): bool
+    {
+        $path = base_path('routes/web.php');
+
+        if (! $this->files->exists($path)) {
+            return false;
+        }
+
+        $contents = $this->files->get($path);
+
+        if (str_contains($contents, "name('dashboard')")) {
+            return true;
+        }
+
+        if (! str_contains($contents, 'use Inertia\Inertia;')) {
+            $withImport = preg_replace(
+                '/^(use Illuminate\\\Support\\\Facades\\\Route;\n)/m',
+                "$1use Inertia\\Inertia;\n",
+                $contents,
+                1,
+            );
+
+            $contents = $withImport ?? $contents;
+        }
+
+        $route = <<<'PHP'
+
+        Route::middleware('auth')->get('/dashboard', function (Illuminate\Http\Request $request) {
+            return Inertia::render('Dashboard', ['user' => $request->user()]);
+        })->name('dashboard');
+
+        PHP;
+
+        $this->files->put($path, $contents.$route);
+
+        return true;
     }
 
     /**
