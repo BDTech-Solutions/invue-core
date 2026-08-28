@@ -2,9 +2,12 @@
 
 namespace Invue\Core\Console\Commands;
 
+use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 
 /**
  * Wires the pieces Getting Started otherwise has you edit by hand:
@@ -35,6 +38,7 @@ class InstallCommand extends Command
         $this->files = $files;
 
         $this->ensureInertiaVueScaffold();
+        $this->ensureAuthScaffold();
 
         $this->installVitePlugin();
         $this->installVuePlugin();
@@ -99,6 +103,251 @@ class InstallCommand extends Command
         $this->components->task("Creating {$entryRelative}", fn () => $this->writeAppEntry($existingEntryPath, $entryRelative));
         $this->components->task('Registering the Vue plugin in vite.config', fn () => $this->registerVuePluginInVite());
         $this->line('');
+    }
+
+    /**
+     * make:invue-panel scaffolds panels with `->middleware(['web', 'auth'])`
+     * by default, so a project with no login route at all can create a
+     * panel and a resource successfully and still 404/redirect-loop the
+     * moment it's visited — this exists so that dead end has a way out.
+     */
+    protected function ensureAuthScaffold(): void
+    {
+        if (Route::has('login')) {
+            return;
+        }
+
+        if (! $this->input->isInteractive()) {
+            return;
+        }
+
+        $this->components->warn('No auth system detected — make:invue-panel scaffolds panels with an `auth` middleware, so nothing behind one will be reachable without a login route.');
+
+        if (! $this->confirm('Set up a minimal login now (routes/auth.php, a login page, a test user)?', true)) {
+            return;
+        }
+
+        $this->bootstrapAuth();
+    }
+
+    protected function bootstrapAuth(): void
+    {
+        $this->line('');
+
+        if (! class_exists(User::class)) {
+            $this->components->warn("No App\\Models\\User class found — can't scaffold auth without it.");
+
+            return;
+        }
+
+        $this->components->task('Creating AuthenticatedSessionController', fn () => $this->writeAuthController());
+        $this->components->task('Creating routes/auth.php', fn () => $this->writeAuthRoutes());
+        $this->components->task('Requiring routes/auth.php from routes/web.php', fn () => $this->registerAuthRoutes());
+        $this->components->task('Creating resources/js/pages/auth/Login.vue', fn () => $this->writeLoginPage());
+
+        $credentials = $this->createTestUser();
+
+        $this->line('');
+
+        if ($credentials !== null) {
+            $this->components->info("Test user ready — email: {$credentials['email']} / password: {$credentials['password']}");
+        }
+    }
+
+    protected function writeAuthController(): bool
+    {
+        $path = app_path('Http/Controllers/Auth/AuthenticatedSessionController.php');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        $stub = <<<'PHP'
+        <?php
+
+        namespace App\Http\Controllers\Auth;
+
+        use App\Http\Controllers\Controller;
+        use Illuminate\Http\RedirectResponse;
+        use Illuminate\Http\Request;
+        use Illuminate\Support\Facades\Auth;
+        use Inertia\Inertia;
+        use Inertia\Response;
+
+        class AuthenticatedSessionController extends Controller
+        {
+            public function create(): Response
+            {
+                return Inertia::render('auth/Login');
+            }
+
+            public function store(Request $request): RedirectResponse
+            {
+                $credentials = $request->validate([
+                    'email' => ['required', 'string', 'email'],
+                    'password' => ['required', 'string'],
+                ]);
+
+                if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+                    return back()->withErrors([
+                        'email' => 'These credentials do not match our records.',
+                    ]);
+                }
+
+                $request->session()->regenerate();
+
+                return redirect()->intended('/');
+            }
+
+            public function destroy(Request $request): RedirectResponse
+            {
+                Auth::guard('web')->logout();
+
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+
+                return redirect('/');
+            }
+        }
+
+        PHP;
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function writeAuthRoutes(): bool
+    {
+        $path = base_path('routes/auth.php');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        $stub = <<<'PHP'
+        <?php
+
+        use App\Http\Controllers\Auth\AuthenticatedSessionController;
+        use Illuminate\Support\Facades\Route;
+
+        Route::middleware('guest')->group(function () {
+            Route::get('login', [AuthenticatedSessionController::class, 'create'])->name('login');
+            Route::post('login', [AuthenticatedSessionController::class, 'store']);
+        });
+
+        Route::middleware('auth')->group(function () {
+            Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+        });
+
+        PHP;
+
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function registerAuthRoutes(): bool
+    {
+        $path = base_path('routes/web.php');
+
+        if (! $this->files->exists($path)) {
+            return false;
+        }
+
+        $contents = $this->files->get($path);
+
+        if (str_contains($contents, "require __DIR__.'/auth.php'")) {
+            return true;
+        }
+
+        $this->files->append($path, "\nrequire __DIR__.'/auth.php';\n");
+
+        return true;
+    }
+
+    protected function writeLoginPage(): bool
+    {
+        $path = resource_path('js/pages/auth/Login.vue');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        // Plain <input>s, not invue/forms fields — this command lives in
+        // invue/core, which has no dependency on invue/forms, and can't
+        // assume it's installed.
+        $stub = <<<'VUE'
+        <script setup>
+        import { useForm } from '@inertiajs/vue3'
+
+        const form = useForm({
+            email: '',
+            password: '',
+            remember: false,
+        })
+
+        function submit() {
+            form.post('/login')
+        }
+        </script>
+
+        <template>
+            <form novalidate @submit.prevent="submit">
+                <div>
+                    <label for="email">Email</label>
+                    <input id="email" v-model="form.email" type="email" required autofocus />
+                    <div v-if="form.errors.email">{{ form.errors.email }}</div>
+                </div>
+
+                <div>
+                    <label for="password">Password</label>
+                    <input id="password" v-model="form.password" type="password" required />
+                    <div v-if="form.errors.password">{{ form.errors.password }}</div>
+                </div>
+
+                <label>
+                    <input v-model="form.remember" type="checkbox" />
+                    Remember me
+                </label>
+
+                <button type="submit" :disabled="form.processing">Log in</button>
+            </form>
+        </template>
+
+        VUE;
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    /**
+     * @return array{email: string, password: string}|null null if a user
+     *                                                     with this email already exists — never overwrites real data.
+     */
+    protected function createTestUser(): ?array
+    {
+        $email = 'admin@example.com';
+
+        if (User::query()->where('email', $email)->exists()) {
+            return null;
+        }
+
+        $password = Str::password(12, symbols: false);
+
+        // Plain, not Hash::make()'d — the default User model casts
+        // 'password' => 'hashed', which would hash an already-hashed
+        // value a second time and silently break login.
+        User::query()->create([
+            'name' => 'Admin',
+            'email' => $email,
+            'password' => $password,
+        ]);
+
+        return ['email' => $email, 'password' => $password];
     }
 
     /**
