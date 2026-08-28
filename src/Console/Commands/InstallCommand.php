@@ -4,6 +4,7 @@ namespace Invue\Core\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Process;
 
 /**
  * Wires the pieces Getting Started otherwise has you edit by hand:
@@ -14,18 +15,26 @@ use Illuminate\Filesystem\Filesystem;
  * shape it expects first, and prints a manual instruction instead of
  * guessing when it can't. Safe to re-run: already-wired files are skipped,
  * not duplicated.
+ *
+ * If no Inertia + Vue setup exists at all and the terminal is interactive,
+ * offers to bootstrap one (composer require, npm install, middleware, root
+ * view, app entry) before wiring Invue into it — see bootstrapInertiaVue().
+ * Non-interactive runs (--no-interaction, CI) never do this automatically;
+ * they get the same plain warning as before.
  */
 class InstallCommand extends Command
 {
     protected $signature = 'invue:install';
 
-    protected $description = 'Wire the Invue Vite plugin, Vue plugin, and Tailwind content glob into an already-installed Laravel + Inertia + Vue app';
+    protected $description = 'Wire the Invue Vite plugin, Vue plugin, and Tailwind content glob into a Laravel + Inertia + Vue app — offers to bootstrap Inertia + Vue first if it\'s missing';
 
     protected Filesystem $files;
 
     public function handle(Filesystem $files): int
     {
         $this->files = $files;
+
+        $this->ensureInertiaVueScaffold();
 
         $this->installVitePlugin();
         $this->installVuePlugin();
@@ -35,6 +44,292 @@ class InstallCommand extends Command
         $this->components->info('Run `php artisan make:invue-panel` next if you don\'t have one yet, then `php artisan make:invue-resource {Model}` for a real CRUD screen — see the Creating Resources page.');
 
         return self::SUCCESS;
+    }
+
+    protected function ensureInertiaVueScaffold(): void
+    {
+        $path = $this->firstExisting(['resources/js/app.ts', 'resources/js/app.js']);
+        $contents = $path !== null ? $this->files->get($path) : '';
+
+        if (str_contains($contents, 'createInertiaApp(')) {
+            return;
+        }
+
+        // Never auto-bootstrap in a non-interactive run (CI, --no-interaction)
+        // — that's a real decision (composer/npm installs, new files), not
+        // something to default into silently. Falls through to the plain
+        // warning installVuePlugin() already prints.
+        if (! $this->input->isInteractive()) {
+            return;
+        }
+
+        $this->components->warn('No Inertia + Vue setup detected.');
+
+        if (! $this->confirm('Install and configure Inertia + Vue now? (composer require, npm install, middleware, root view, app entry)', true)) {
+            return;
+        }
+
+        $this->bootstrapInertiaVue($path);
+    }
+
+    protected function bootstrapInertiaVue(?string $existingEntryPath): void
+    {
+        $this->line('');
+
+        $entryRelative = $existingEntryPath !== null
+            ? $this->relative($existingEntryPath)
+            : 'resources/js/app.ts';
+
+        if (! $this->runStreamed('composer require inertiajs/inertia-laravel', ['composer', 'require', 'inertiajs/inertia-laravel'], fn () => $this->composerHasPackage('inertiajs/inertia-laravel'))) {
+            $this->components->error('composer require failed — fix that, then re-run `php artisan invue:install`.');
+
+            return;
+        }
+
+        if (! $this->runStreamed('npm install @inertiajs/vue3 vue @vitejs/plugin-vue', ['npm', 'install', '@inertiajs/vue3', 'vue', '@vitejs/plugin-vue'], fn () => $this->npmHasPackages(['@inertiajs/vue3', 'vue', '@vitejs/plugin-vue']))) {
+            $this->components->error('npm install failed — fix that, then re-run `php artisan invue:install`.');
+
+            return;
+        }
+
+        $this->line('');
+        $this->components->task('Creating HandleInertiaRequests middleware', fn () => $this->writeInertiaMiddleware());
+        $this->components->task('Registering the middleware in bootstrap/app.php', fn () => $this->registerInertiaMiddleware());
+        $this->components->task('Creating resources/views/app.blade.php', fn () => $this->writeRootView($entryRelative));
+        $this->components->task("Creating {$entryRelative}", fn () => $this->writeAppEntry($existingEntryPath, $entryRelative));
+        $this->components->task('Registering the Vue plugin in vite.config', fn () => $this->registerVuePluginInVite());
+        $this->line('');
+    }
+
+    /**
+     * Runs a composer/npm command with its real output streamed to the
+     * console (a task() spinner would hide install progress for what can be
+     * a 30+ second step) — then verifies the package actually landed rather
+     * than trusting the process exit code alone.
+     *
+     * @param  list<string>  $command
+     */
+    protected function runStreamed(string $label, array $command, callable $verify): bool
+    {
+        $this->components->info($label);
+
+        $result = Process::path(base_path())->timeout(300)->run($command, function (string $type, string $output): void {
+            $this->output->write($output);
+        });
+
+        return $result->successful() && $verify();
+    }
+
+    protected function composerHasPackage(string $package): bool
+    {
+        $composerJson = json_decode($this->files->get(base_path('composer.json')), true);
+
+        return isset($composerJson['require'][$package]);
+    }
+
+    /**
+     * @param  list<string>  $packages
+     */
+    protected function npmHasPackages(array $packages): bool
+    {
+        $packageJson = json_decode($this->files->get(base_path('package.json')), true);
+
+        foreach ($packages as $package) {
+            if (! isset($packageJson['dependencies'][$package]) && ! isset($packageJson['devDependencies'][$package])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected function writeInertiaMiddleware(): bool
+    {
+        $path = app_path('Http/Middleware/HandleInertiaRequests.php');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        $stub = <<<'PHP'
+        <?php
+
+        namespace App\Http\Middleware;
+
+        use Illuminate\Http\Request;
+        use Inertia\Middleware;
+
+        class HandleInertiaRequests extends Middleware
+        {
+            /**
+             * The root template that's loaded on the first page visit.
+             */
+            protected $rootView = 'app';
+
+            public function version(Request $request): ?string
+            {
+                return parent::version($request);
+            }
+
+            /**
+             * @return array<string, mixed>
+             */
+            public function share(Request $request): array
+            {
+                return [
+                    ...parent::share($request),
+                ];
+            }
+        }
+
+        PHP;
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function registerInertiaMiddleware(): bool
+    {
+        $path = base_path('bootstrap/app.php');
+
+        if (! $this->files->exists($path)) {
+            return false;
+        }
+
+        $contents = $this->files->get($path);
+
+        if (str_contains($contents, 'HandleInertiaRequests')) {
+            return true;
+        }
+
+        // Targets the exact shape of a fresh Laravel skeleton's
+        // ->withMiddleware(function (Middleware $middleware): void { // })
+        // block. A project that already customized this block won't match
+        // — that's the honest gap, not a guess.
+        $updated = preg_replace(
+            '/(->withMiddleware\(function \(Middleware \$middleware\)(?::\s*void)?\s*\{\n)(\s*)\/\/\s*\n/',
+            "\$1\$2\$middleware->web(append: [\\App\\Http\\Middleware\\HandleInertiaRequests::class]);\n",
+            $contents,
+            1,
+        );
+
+        if ($updated === null || $updated === $contents) {
+            return false;
+        }
+
+        $this->files->put($path, $updated);
+
+        return true;
+    }
+
+    protected function writeRootView(string $entryRelative): bool
+    {
+        $path = base_path('resources/views/app.blade.php');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        $stub = <<<'BLADE'
+        <!DOCTYPE html>
+        <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+
+                @vite(['%%ENTRY%%', "resources/js/pages/{$page['component']}.vue"])
+                <x-inertia::head>
+                    <title>{{ config('app.name', 'Laravel') }}</title>
+                </x-inertia::head>
+            </head>
+            <body class="antialiased">
+                <x-inertia::app />
+            </body>
+        </html>
+
+        BLADE;
+
+        $stub = str_replace('%%ENTRY%%', $entryRelative, $stub);
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function writeAppEntry(?string $existingEntryPath, string $entryRelative): bool
+    {
+        $targetPath = base_path($entryRelative);
+
+        if ($existingEntryPath !== null) {
+            if (! $this->isTriviallyEmpty($this->files->get($existingEntryPath))) {
+                // Has real content but no createInertiaApp() — not ours to
+                // overwrite. installVuePlugin() prints its own warning for
+                // this once it runs.
+                return false;
+            }
+
+            $targetPath = $existingEntryPath;
+        }
+
+        // The classic explicit setup() shape, not Inertia v3's auto-mount —
+        // deliberately, so installVuePlugin()'s existing app.mount() branch
+        // (already written and tested for that shape) is what wires
+        // createInvue() into this file, right after this method returns.
+        $stub = <<<'JS'
+        import { createApp, h } from 'vue'
+        import { createInertiaApp } from '@inertiajs/vue3'
+        import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers'
+
+        createInertiaApp({
+            resolve: (name) => resolvePageComponent(`./pages/${name}.vue`, import.meta.glob('./pages/**/*.vue')),
+            setup({ el, App, props, plugin }) {
+                const app = createApp({ render: () => h(App, props) })
+                app.use(plugin)
+                app.mount(el)
+            },
+        })
+        JS;
+
+        $this->files->ensureDirectoryExists(dirname($targetPath));
+        $this->files->put($targetPath, $stub."\n");
+
+        return true;
+    }
+
+    protected function registerVuePluginInVite(): bool
+    {
+        $path = $this->firstExisting(['vite.config.ts', 'vite.config.js']);
+
+        if ($path === null) {
+            return false;
+        }
+
+        $contents = $this->files->get($path);
+
+        if (str_contains($contents, "from '@vitejs/plugin-vue'")) {
+            return true;
+        }
+
+        $updated = $this->patchPluginsArray($contents, "import vue from '@vitejs/plugin-vue';", 'vue(),');
+
+        if ($updated === null) {
+            return false;
+        }
+
+        $this->files->put($path, $updated);
+
+        return true;
+    }
+
+    protected function isTriviallyEmpty(string $contents): bool
+    {
+        $stripped = preg_replace('#//[^\n]*#', '', $contents);
+        $stripped = preg_replace('#/\*.*?\*/#s', '', (string) $stripped);
+
+        return trim((string) $stripped) === '';
     }
 
     protected function installVitePlugin(): void
@@ -56,21 +351,9 @@ class InstallCommand extends Command
             return;
         }
 
-        $updated = preg_replace(
-            '/^(import .+;\n)(?!import)/m',
-            "\$1import invue from '@invue-domain/vite-plugin';\n",
-            $contents,
-            1,
-        );
+        $updated = $this->patchPluginsArray($contents, "import invue from '@invue-domain/vite-plugin';", 'invue(),');
 
-        $updated = $updated === null ? null : preg_replace(
-            '/(plugins:\s*\[\s*\n)(\s*)/',
-            "\$1\$2invue(),\n\$2",
-            $updated,
-            1,
-        );
-
-        if ($updated === null || $updated === $contents) {
+        if ($updated === null) {
             $this->components->warn("Couldn't confidently patch {$relative} — add `import invue from '@invue-domain/vite-plugin'` and `invue()` inside `plugins: [...]` yourself.");
 
             return;
@@ -78,6 +361,31 @@ class InstallCommand extends Command
 
         $this->files->put($path, $updated);
         $this->components->twoColumnDetail($relative, '<fg=green>wired</>');
+    }
+
+    /**
+     * Shared by installVitePlugin() and registerVuePluginInVite() — adds an
+     * import after the last top-level import line, and the matching plugin
+     * call as the first entry in plugins: [...]. Returns null rather than
+     * guessing when either regex doesn't match.
+     */
+    protected function patchPluginsArray(string $contents, string $importStatement, string $pluginCall): ?string
+    {
+        $updated = preg_replace(
+            '/^(import .+;\n)(?!import)/m',
+            "\$1{$importStatement}\n",
+            $contents,
+            1,
+        );
+
+        $updated = $updated === null ? null : preg_replace(
+            '/(plugins:\s*\[\s*\n)(\s*)/',
+            "\$1\$2{$pluginCall}\n\$2",
+            $updated,
+            1,
+        );
+
+        return ($updated === null || $updated === $contents) ? null : $updated;
     }
 
     protected function installVuePlugin(): void
