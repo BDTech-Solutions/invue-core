@@ -92,7 +92,7 @@ class InstallCommand extends Command
             return;
         }
 
-        if (! $this->runStreamed('npm install @inertiajs/vue3 vue @vitejs/plugin-vue', ['npm', 'install', '@inertiajs/vue3', 'vue', '@vitejs/plugin-vue'], fn () => $this->npmHasPackages(['@inertiajs/vue3', 'vue', '@vitejs/plugin-vue']))) {
+        if (! $this->runStreamed('npm install @inertiajs/vue3 vue @vitejs/plugin-vue @lucide/vue', ['npm', 'install', '@inertiajs/vue3', 'vue', '@vitejs/plugin-vue', '@lucide/vue'], fn () => $this->npmHasPackages(['@inertiajs/vue3', 'vue', '@vitejs/plugin-vue', '@lucide/vue']))) {
             $this->components->error('npm install failed — fix that, then re-run `php artisan invue:install`.');
 
             return;
@@ -918,28 +918,48 @@ class InstallCommand extends Command
             return;
         }
 
-        $import = "import { createInvue } from 'invue/core';\n";
+        // @lucide/vue backs the default icon set registered below — needed
+        // here too (not just in bootstrapInertiaVue()) because this method
+        // also runs against Inertia + Vue setups that already existed before
+        // invue:install and never went through that bootstrap step.
+        if (! $this->npmHasPackages(['@lucide/vue'])) {
+            $this->runStreamed('npm install @lucide/vue', ['npm', 'install', '@lucide/vue'], fn () => $this->npmHasPackages(['@lucide/vue']));
+        }
+
+        $import = "import { createInvue } from 'invue/core';\nimport { LayoutDashboard } from '@lucide/vue';\n";
         $updated = null;
 
         // [ \t]*, not \s* — \s also matches the newline of a preceding blank
         // line, which would make "indent" capture a stray \n and double up
         // every blank line in the file once it's spliced back in below.
+        //
+        // Registers 'layout-dashboard' by default because it's the one icon
+        // name Invue's own generators reference without being told to
+        // (PanelManager::navigationFor()'s synthetic Dashboard nav entry) —
+        // Icon.vue renders nothing for any name that isn't explicitly
+        // registered, so without this the Dashboard's sidebar icon would
+        // silently never appear.
         if (preg_match('/^([ \t]*)app\.mount\(/m', $contents, $matches)) {
             // Explicit setup({ el, App, props, plugin }) callback style —
             // app.use(plugin) already exists; insert right before app.mount().
             $indent = $matches[1];
             $updated = preg_replace(
                 '/^([ \t]*)app\.mount\(/m',
-                "{$indent}app.use(createInvue());\n{$indent}app.mount(",
+                "{$indent}const invue = createInvue();\n".
+                "{$indent}invue.registerIcons({ 'layout-dashboard': LayoutDashboard });\n".
+                "{$indent}app.use(invue);\n{$indent}app.mount(",
                 $contents,
                 1,
             );
         } elseif (preg_match('/^([ \t]*)withApp:\s*\(app(?:,[^)]*)?\)\s*=>\s*\{\n/m', $contents, $matches)) {
-            // Existing withApp() hook — append the call inside it.
+            // Existing withApp() hook — append the calls inside it.
             $indent = $matches[1];
+            $inner = "{$indent}    ";
             $updated = preg_replace(
                 '/^([ \t]*withApp:\s*\(app(?:,[^)]*)?\)\s*=>\s*\{\n)/m',
-                "\$1{$indent}    app.use(createInvue());\n",
+                "\$1{$inner}const invue = createInvue();\n".
+                "{$inner}invue.registerIcons({ 'layout-dashboard': LayoutDashboard });\n".
+                "{$inner}app.use(invue);\n",
                 $contents,
                 1,
             );
@@ -947,9 +967,13 @@ class InstallCommand extends Command
             // Neither setup nor withApp — Inertia mounts automatically
             // (v3's default), so add a withApp hook to reach the app instance.
             $indent = $matches[1];
+            $inner = "{$indent}        ";
             $updated = preg_replace(
                 '/^([ \t]*createInertiaApp\(\{\n)/m',
-                "\$1{$indent}    withApp: (app) => {\n{$indent}        app.use(createInvue());\n{$indent}    },\n",
+                "\$1{$indent}    withApp: (app) => {\n".
+                "{$inner}const invue = createInvue();\n".
+                "{$inner}invue.registerIcons({ 'layout-dashboard': LayoutDashboard });\n".
+                "{$inner}app.use(invue);\n{$indent}    },\n",
                 $contents,
                 1,
             );
