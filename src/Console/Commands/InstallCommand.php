@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Invue\Forms\FormsServiceProvider;
+use Invue\Notifications\NotificationsServiceProvider;
 use Invue\Panels\PanelsServiceProvider;
 
 /**
@@ -210,7 +211,7 @@ class InstallCommand extends Command
                 $request->session()->invalidate();
                 $request->session()->regenerateToken();
 
-                return redirect('/');
+                return redirect('/login');
             }
         }
 
@@ -452,7 +453,6 @@ class InstallCommand extends Command
         // hatch for exactly this.
         return <<<'VUE'
         <script setup>
-        import { router } from '@inertiajs/vue3'
         import { Sidebar, Topbar } from 'invue/panels'
 
         defineProps({
@@ -460,10 +460,6 @@ class InstallCommand extends Command
         })
 
         const items = [{ label: 'Dashboard', icon: 'layout-dashboard', url: '/dashboard' }]
-
-        function logout() {
-            router.post('/logout')
-        }
         </script>
 
         <template>
@@ -471,11 +467,7 @@ class InstallCommand extends Command
                 <Sidebar :items="items" />
 
                 <div class="flex flex-1 flex-col">
-                    <Topbar>
-                        <button type="button" class="text-sm text-gray-500 hover:text-gray-700" @click="logout">
-                            Log out
-                        </button>
-                    </Topbar>
+                    <Topbar />
 
                     <main class="flex-1 p-6">
                         <h1 class="text-xl font-semibold text-gray-900">Dashboard</h1>
@@ -829,6 +821,14 @@ class InstallCommand extends Command
         return true;
     }
 
+    /**
+     * @param  list<string>  $lines
+     */
+    protected function indentLines(array $lines, string $indent): string
+    {
+        return implode('', array_map(fn (string $line) => "{$indent}{$line}\n", $lines));
+    }
+
     protected function isTriviallyEmpty(string $contents): bool
     {
         $stripped = preg_replace('#//[^\n]*#', '', $contents);
@@ -926,28 +926,55 @@ class InstallCommand extends Command
             $this->runStreamed('npm install @lucide/vue', ['npm', 'install', '@lucide/vue'], fn () => $this->npmHasPackages(['@lucide/vue']));
         }
 
-        $import = "import { createInvue } from 'invue/core';\nimport { LayoutDashboard } from '@lucide/vue';\n";
-        $updated = null;
+        // invue/panels can't composer-depend on invue/notifications (wrong
+        // direction), so its Topbar can only resolve the bell through the
+        // registry — never import it directly. This is the other end of
+        // that wiring: register Bell under 'panels.topbarBell' here, the
+        // same place Topbar.vue's `TopbarBell` computed looks for it, but
+        // only when invue/notifications is actually installed.
+        $hasNotifications = class_exists(NotificationsServiceProvider::class);
 
-        // [ \t]*, not \s* — \s also matches the newline of a preceding blank
-        // line, which would make "indent" capture a stray \n and double up
-        // every blank line in the file once it's spliced back in below.
-        //
+        $lucideIcons = $hasNotifications ? 'Bell as BellIcon, LayoutDashboard' : 'LayoutDashboard';
+        $import = "import { createInvue } from 'invue/core';\n";
+
+        if ($hasNotifications) {
+            $import .= "import { Bell as NotificationsBell } from 'invue/notifications';\n";
+        }
+
+        $import .= "import { {$lucideIcons} } from '@lucide/vue';\n";
+
         // Registers 'layout-dashboard' by default because it's the one icon
         // name Invue's own generators reference without being told to
         // (PanelManager::navigationFor()'s synthetic Dashboard nav entry) —
         // Icon.vue renders nothing for any name that isn't explicitly
         // registered, so without this the Dashboard's sidebar icon would
-        // silently never appear.
+        // silently never appear. 'bell' is registered the same way, only
+        // when invue/notifications backs it.
+        $icons = $hasNotifications ? "{ 'layout-dashboard': LayoutDashboard, bell: BellIcon }" : "{ 'layout-dashboard': LayoutDashboard }";
+
+        $bodyLines = [
+            'const invue = createInvue();',
+            "invue.registerIcons({$icons});",
+        ];
+
+        if ($hasNotifications) {
+            $bodyLines[] = "invue.registry.register('panels.topbarBell', NotificationsBell);";
+        }
+
+        $bodyLines[] = 'app.use(invue);';
+
+        $updated = null;
+
+        // [ \t]*, not \s* — \s also matches the newline of a preceding blank
+        // line, which would make "indent" capture a stray \n and double up
+        // every blank line in the file once it's spliced back in below.
         if (preg_match('/^([ \t]*)app\.mount\(/m', $contents, $matches)) {
             // Explicit setup({ el, App, props, plugin }) callback style —
             // app.use(plugin) already exists; insert right before app.mount().
             $indent = $matches[1];
             $updated = preg_replace(
                 '/^([ \t]*)app\.mount\(/m',
-                "{$indent}const invue = createInvue();\n".
-                "{$indent}invue.registerIcons({ 'layout-dashboard': LayoutDashboard });\n".
-                "{$indent}app.use(invue);\n{$indent}app.mount(",
+                $this->indentLines($bodyLines, $indent)."{$indent}app.mount(",
                 $contents,
                 1,
             );
@@ -957,9 +984,7 @@ class InstallCommand extends Command
             $inner = "{$indent}    ";
             $updated = preg_replace(
                 '/^([ \t]*withApp:\s*\(app(?:,[^)]*)?\)\s*=>\s*\{\n)/m',
-                "\$1{$inner}const invue = createInvue();\n".
-                "{$inner}invue.registerIcons({ 'layout-dashboard': LayoutDashboard });\n".
-                "{$inner}app.use(invue);\n",
+                '$1'.$this->indentLines($bodyLines, $inner),
                 $contents,
                 1,
             );
@@ -971,9 +996,8 @@ class InstallCommand extends Command
             $updated = preg_replace(
                 '/^([ \t]*createInertiaApp\(\{\n)/m',
                 "\$1{$indent}    withApp: (app) => {\n".
-                "{$inner}const invue = createInvue();\n".
-                "{$inner}invue.registerIcons({ 'layout-dashboard': LayoutDashboard });\n".
-                "{$inner}app.use(invue);\n{$indent}    },\n",
+                $this->indentLines($bodyLines, $inner).
+                "{$indent}    },\n",
                 $contents,
                 1,
             );
