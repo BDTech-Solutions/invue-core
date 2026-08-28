@@ -145,8 +145,8 @@ class InstallCommand extends Command
         $this->components->task('Creating AuthenticatedSessionController', fn () => $this->writeAuthController());
         $this->components->task('Creating routes/auth.php', fn () => $this->writeAuthRoutes());
         $this->components->task('Requiring routes/auth.php from routes/web.php', fn () => $this->registerAuthRoutes());
-        $this->components->task('Creating resources/js/pages/auth/Login.vue', fn () => $this->writeLoginPage());
-        $this->components->task('Creating resources/js/pages/Dashboard.vue', fn () => $this->writeDashboardPage());
+        $this->components->task('Creating resources/js/Pages/auth/Login.vue', fn () => $this->writeLoginPage());
+        $this->components->task('Creating resources/js/Pages/Dashboard.vue', fn () => $this->writeDashboardPage());
         $this->components->task('Adding the /dashboard route', fn () => $this->writeDashboardRoute());
 
         $credentials = $this->createTestUser();
@@ -273,7 +273,7 @@ class InstallCommand extends Command
 
     protected function writeLoginPage(): bool
     {
-        $path = resource_path('js/pages/auth/Login.vue');
+        $path = resource_path('js/Pages/auth/Login.vue');
 
         if ($this->files->exists($path)) {
             return true;
@@ -417,7 +417,7 @@ class InstallCommand extends Command
 
     protected function writeDashboardPage(): bool
     {
-        $path = resource_path('js/pages/Dashboard.vue');
+        $path = resource_path('js/Pages/Dashboard.vue');
 
         if ($this->files->exists($path)) {
             return true;
@@ -677,6 +677,12 @@ class InstallCommand extends Command
             {
                 return [
                     ...parent::share($request),
+                    // Breeze/Jetstream's own convention — invue/panels'
+                    // Topbar reads this directly for its default user
+                    // avatar, no extra wiring needed on top.
+                    'auth' => [
+                        'user' => $request->user(),
+                    ],
                 ];
             }
         }
@@ -738,7 +744,7 @@ class InstallCommand extends Command
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-                @vite(['resources/css/app.css', '%%ENTRY%%', "resources/js/pages/{$page['component']}.vue"])
+                @vite(['resources/css/app.css', '%%ENTRY%%', "resources/js/Pages/{$page['component']}.vue"])
                 <x-inertia::head>
                     <title>{{ config('app.name', 'Laravel') }}</title>
                 </x-inertia::head>
@@ -783,7 +789,7 @@ class InstallCommand extends Command
         import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers'
 
         createInertiaApp({
-            resolve: (name) => resolvePageComponent(`./pages/${name}.vue`, import.meta.glob('./pages/**/*.vue')),
+            resolve: (name) => resolvePageComponent(`./Pages/${name}.vue`, import.meta.glob('./Pages/**/*.vue')),
             setup({ el, App, props, plugin }) {
                 const app = createApp({ render: () => h(App, props) })
                 app.use(plugin)
