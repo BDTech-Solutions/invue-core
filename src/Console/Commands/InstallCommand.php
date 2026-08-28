@@ -8,6 +8,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Invue\Forms\FormsServiceProvider;
 
 /**
  * Wires the pieces Getting Started otherwise has you edit by hand:
@@ -275,14 +276,75 @@ class InstallCommand extends Command
             return true;
         }
 
-        // Plain <input>s, not invue/forms fields — this command lives in
-        // invue/core, which has no dependency on invue/forms, and can't
-        // assume it's installed. Tailwind utility classes only, matching
-        // the look make:invue-resource's own generated Create/Edit pages
-        // already use (max-w-lg, the same green submit button) — Tailwind
-        // itself is a safe assumption, invue:install wires its content
-        // glob unconditionally.
-        $stub = <<<'VUE'
+        // invue/core has no composer dependency on invue/forms — the
+        // direction only ever goes the other way — but the *recommended*
+        // install path (composer require invue/invue) pulls forms in
+        // too, same as filament/filament bundling its own form components
+        // for the panel builder. Detect it at runtime rather than assume
+        // either way: real invue/forms fields when it's there, a plain
+        // Tailwind-only fallback (still styled, just no field components)
+        // when it isn't.
+        $stub = class_exists(FormsServiceProvider::class)
+            ? $this->loginPageWithInvueForms()
+            : $this->loginPageWithPlainInputs();
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->put($path, $stub);
+
+        return true;
+    }
+
+    protected function loginPageWithInvueForms(): string
+    {
+        return <<<'VUE'
+        <script setup>
+        import { useForm } from '@inertiajs/vue3'
+        import { TextInput, Checkbox, useInvueField } from 'invue/forms'
+
+        const form = useForm({
+            email: '',
+            password: '',
+            remember: false,
+        })
+
+        const { modelValue: email, error: emailError } = useInvueField(form, 'email')
+        const { modelValue: password, error: passwordError } = useInvueField(form, 'password')
+
+        function submit() {
+            form.post('/login')
+        }
+        </script>
+
+        <template>
+            <div class="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+                <form
+                    class="w-full max-w-sm space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+                    novalidate
+                    @submit.prevent="submit"
+                >
+                    <h1 class="text-lg font-semibold text-gray-900">Log in</h1>
+
+                    <TextInput v-model="email" :error="emailError" type="email" label="Email" required />
+                    <TextInput v-model="password" :error="passwordError" type="password" label="Password" required />
+                    <Checkbox v-model="form.remember" label="Remember me" />
+
+                    <button
+                        type="submit"
+                        :disabled="form.processing"
+                        class="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Log in
+                    </button>
+                </form>
+            </div>
+        </template>
+
+        VUE;
+    }
+
+    protected function loginPageWithPlainInputs(): string
+    {
+        return <<<'VUE'
         <script setup>
         import { useForm } from '@inertiajs/vue3'
 
@@ -348,11 +410,6 @@ class InstallCommand extends Command
         </template>
 
         VUE;
-
-        $this->files->ensureDirectoryExists(dirname($path));
-        $this->files->put($path, $stub);
-
-        return true;
     }
 
     /**
