@@ -146,6 +146,7 @@ class InstallCommand extends Command
         $this->components->task('Creating AuthenticatedSessionController', fn () => $this->writeAuthController());
         $this->components->task('Creating routes/auth.php', fn () => $this->writeAuthRoutes());
         $this->components->task('Requiring routes/auth.php from routes/web.php', fn () => $this->registerAuthRoutes());
+        $this->components->task('Copying the login background image', fn () => $this->writeAuthBackground());
         $this->components->task('Creating resources/js/Pages/auth/Login.vue', fn () => $this->writeLoginPage());
         $this->components->task('Creating resources/js/Pages/Dashboard.vue', fn () => $this->writeDashboardPage());
         $this->components->task('Adding the /dashboard route', fn () => $this->writeDashboardRoute());
@@ -272,6 +273,26 @@ class InstallCommand extends Command
         return true;
     }
 
+    /**
+     * The split-screen login's right-hand panel background — served from
+     * public/, not resolved through Vite, so the generated Login.vue can
+     * reference a plain '/images/invue/auth-bg.png' URL that works
+     * regardless of the app's alias/import setup.
+     */
+    protected function writeAuthBackground(): bool
+    {
+        $path = public_path('images/invue/auth-bg.png');
+
+        if ($this->files->exists($path)) {
+            return true;
+        }
+
+        $this->files->ensureDirectoryExists(dirname($path));
+        $this->files->copy(__DIR__.'/../../../stubs/images/auth-bg.png', $path);
+
+        return true;
+    }
+
     protected function writeLoginPage(): bool
     {
         $path = resource_path('js/Pages/auth/Login.vue');
@@ -314,32 +335,46 @@ class InstallCommand extends Command
         const { modelValue: email, error: emailError } = useInvueField(form, 'email')
         const { modelValue: password, error: passwordError } = useInvueField(form, 'password')
 
+        const appName = import.meta.env.VITE_APP_NAME ?? 'Laravel'
+
         function submit() {
             form.post('/login')
         }
         </script>
 
         <template>
-            <div class="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-                <form
-                    class="w-full max-w-sm space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
-                    novalidate
-                    @submit.prevent="submit"
-                >
-                    <h1 class="text-lg font-semibold text-gray-900">Log in</h1>
+            <div class="flex min-h-screen items-center justify-center bg-gray-50 p-4">
+                <div class="grid w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl lg:grid-cols-2">
+                    <div class="flex flex-col justify-center p-8 sm:p-12">
+                        <h1 class="text-2xl font-semibold text-gray-900">Welcome back</h1>
+                        <p class="mt-1 text-sm text-gray-500">Sign in to continue to {{ appName }}.</p>
 
-                    <TextInput v-model="email" :error="emailError" type="email" label="Email" required />
-                    <TextInput v-model="password" :error="passwordError" type="password" label="Password" required />
-                    <Checkbox v-model="form.remember" label="Remember me" />
+                        <form class="mt-8 space-y-4" novalidate @submit.prevent="submit">
+                            <TextInput v-model="email" :error="emailError" type="email" label="Email" required autofocus />
+                            <TextInput v-model="password" :error="passwordError" type="password" label="Password" required />
+                            <Checkbox v-model="form.remember" label="Remember me" />
 
-                    <button
-                        type="submit"
-                        :disabled="form.processing"
-                        class="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                            <button
+                                type="submit"
+                                :disabled="form.processing"
+                                class="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                Log in
+                            </button>
+                        </form>
+                    </div>
+
+                    <div
+                        class="relative hidden flex-col bg-gray-950 p-10 lg:flex"
+                        style="background-image: url('/images/invue/auth-bg.png'); background-size: cover; background-position: center;"
                     >
-                        Log in
-                    </button>
-                </form>
+                        <div class="absolute inset-0 bg-gradient-to-b from-gray-950/80 via-gray-950/10 to-gray-950/70" />
+                        <div class="relative">
+                            <p class="text-2xl font-semibold text-white">{{ appName }}</p>
+                            <p class="mt-2 max-w-xs text-sm text-gray-300">Everything you need to run things, in one place.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </template>
 
@@ -358,58 +393,72 @@ class InstallCommand extends Command
             remember: false,
         })
 
+        const appName = import.meta.env.VITE_APP_NAME ?? 'Laravel'
+
         function submit() {
             form.post('/login')
         }
         </script>
 
         <template>
-            <div class="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-                <form
-                    class="w-full max-w-sm space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
-                    novalidate
-                    @submit.prevent="submit"
-                >
-                    <h1 class="text-lg font-semibold text-gray-900">Log in</h1>
+            <div class="flex min-h-screen items-center justify-center bg-gray-50 p-4">
+                <div class="grid w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl lg:grid-cols-2">
+                    <div class="flex flex-col justify-center p-8 sm:p-12">
+                        <h1 class="text-2xl font-semibold text-gray-900">Welcome back</h1>
+                        <p class="mt-1 text-sm text-gray-500">Sign in to continue to {{ appName }}.</p>
 
-                    <div>
-                        <label for="email" class="mb-1 block text-sm font-medium text-gray-700">Email</label>
-                        <input
-                            id="email"
-                            v-model="form.email"
-                            type="email"
-                            required
-                            autofocus
-                            class="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-green-500 focus:ring-green-500"
-                        />
-                        <p v-if="form.errors.email" class="mt-1 text-sm text-red-600">{{ form.errors.email }}</p>
+                        <form class="mt-8 space-y-4" novalidate @submit.prevent="submit">
+                            <div>
+                                <label for="email" class="mb-1 block text-sm font-medium text-gray-700">Email</label>
+                                <input
+                                    id="email"
+                                    v-model="form.email"
+                                    type="email"
+                                    required
+                                    autofocus
+                                    class="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-green-500 focus:ring-green-500"
+                                />
+                                <p v-if="form.errors.email" class="mt-1 text-sm text-red-600">{{ form.errors.email }}</p>
+                            </div>
+
+                            <div>
+                                <label for="password" class="mb-1 block text-sm font-medium text-gray-700">Password</label>
+                                <input
+                                    id="password"
+                                    v-model="form.password"
+                                    type="password"
+                                    required
+                                    class="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-green-500 focus:ring-green-500"
+                                />
+                                <p v-if="form.errors.password" class="mt-1 text-sm text-red-600">{{ form.errors.password }}</p>
+                            </div>
+
+                            <label class="flex items-center gap-2 text-sm text-gray-600">
+                                <input v-model="form.remember" type="checkbox" class="rounded border-gray-300" />
+                                Remember me
+                            </label>
+
+                            <button
+                                type="submit"
+                                :disabled="form.processing"
+                                class="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                Log in
+                            </button>
+                        </form>
                     </div>
 
-                    <div>
-                        <label for="password" class="mb-1 block text-sm font-medium text-gray-700">Password</label>
-                        <input
-                            id="password"
-                            v-model="form.password"
-                            type="password"
-                            required
-                            class="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-green-500 focus:ring-green-500"
-                        />
-                        <p v-if="form.errors.password" class="mt-1 text-sm text-red-600">{{ form.errors.password }}</p>
-                    </div>
-
-                    <label class="flex items-center gap-2 text-sm text-gray-600">
-                        <input v-model="form.remember" type="checkbox" class="rounded border-gray-300" />
-                        Remember me
-                    </label>
-
-                    <button
-                        type="submit"
-                        :disabled="form.processing"
-                        class="w-full rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    <div
+                        class="relative hidden flex-col bg-gray-950 p-10 lg:flex"
+                        style="background-image: url('/images/invue/auth-bg.png'); background-size: cover; background-position: center;"
                     >
-                        Log in
-                    </button>
-                </form>
+                        <div class="absolute inset-0 bg-gradient-to-b from-gray-950/80 via-gray-950/10 to-gray-950/70" />
+                        <div class="relative">
+                            <p class="text-2xl font-semibold text-white">{{ appName }}</p>
+                            <p class="mt-2 max-w-xs text-sm text-gray-300">Everything you need to run things, in one place.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </template>
 
