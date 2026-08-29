@@ -1000,28 +1000,25 @@ class InstallCommand extends Command
         // only when invue/notifications is actually installed.
         $hasNotifications = class_exists(NotificationsServiceProvider::class);
 
-        $lucideIcons = 'LayoutDashboard, Pencil, Trash2'.($hasNotifications ? ', Bell as BellIcon' : '');
         $import = "import { createInvue } from 'invue/core';\n";
 
         if ($hasNotifications) {
             $import .= "import { Bell as NotificationsBell } from 'invue/notifications';\n";
         }
 
-        $import .= "import { {$lucideIcons} } from '@lucide/vue';\n";
-
-        // Registers 'layout-dashboard', 'pencil', 'trash' by default because
-        // they're icon names Invue's own generators reference without being
-        // told to (PanelManager::navigationFor()'s synthetic Dashboard nav
-        // entry; make:invue-resource's default Edit/Delete row actions) —
-        // Icon.vue renders nothing for any name that isn't explicitly
-        // registered, so without this those icons would silently never
-        // appear. 'bell' is registered the same way, only when
-        // invue/notifications backs it.
-        $icons = "{ 'layout-dashboard': LayoutDashboard, pencil: Pencil, trash: Trash2".($hasNotifications ? ', bell: BellIcon }' : ' }');
-
+        // No Lucide import here, deliberately — Icon.vue falls back to a
+        // lazy, code-split `import('@lucide/vue')` for any icon name that
+        // isn't explicitly registered (a Resource's own $navigationIcon,
+        // 'layout-dashboard', 'pencil', 'trash', all of it), so this file
+        // never needs to know the icon set upfront. A STATIC import of even
+        // one Lucide icon here would defeat that split — Rolldown folds the
+        // dynamic import into the same eager chunk once any static import
+        // of the same module exists anywhere in the graph (measured: the
+        // whole ~2000-icon set, +164KB gzipped, on every page). Keep this
+        // file Lucide-import-free and let Icon.vue be the only place that
+        // ever touches the package.
         $bodyLines = [
             'const invue = createInvue();',
-            "invue.registerIcons({$icons});",
         ];
 
         if ($hasNotifications) {
