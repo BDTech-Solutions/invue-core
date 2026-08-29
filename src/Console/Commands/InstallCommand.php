@@ -1000,7 +1000,7 @@ class InstallCommand extends Command
         // only when invue/notifications is actually installed.
         $hasNotifications = class_exists(NotificationsServiceProvider::class);
 
-        $lucideIcons = $hasNotifications ? 'Bell as BellIcon, LayoutDashboard' : 'LayoutDashboard';
+        $lucideIcons = 'LayoutDashboard, Pencil, Trash2'.($hasNotifications ? ', Bell as BellIcon' : '');
         $import = "import { createInvue } from 'invue/core';\n";
 
         if ($hasNotifications) {
@@ -1009,14 +1009,15 @@ class InstallCommand extends Command
 
         $import .= "import { {$lucideIcons} } from '@lucide/vue';\n";
 
-        // Registers 'layout-dashboard' by default because it's the one icon
-        // name Invue's own generators reference without being told to
-        // (PanelManager::navigationFor()'s synthetic Dashboard nav entry) —
+        // Registers 'layout-dashboard', 'pencil', 'trash' by default because
+        // they're icon names Invue's own generators reference without being
+        // told to (PanelManager::navigationFor()'s synthetic Dashboard nav
+        // entry; make:invue-resource's default Edit/Delete row actions) —
         // Icon.vue renders nothing for any name that isn't explicitly
-        // registered, so without this the Dashboard's sidebar icon would
-        // silently never appear. 'bell' is registered the same way, only
-        // when invue/notifications backs it.
-        $icons = $hasNotifications ? "{ 'layout-dashboard': LayoutDashboard, bell: BellIcon }" : "{ 'layout-dashboard': LayoutDashboard }";
+        // registered, so without this those icons would silently never
+        // appear. 'bell' is registered the same way, only when
+        // invue/notifications backs it.
+        $icons = "{ 'layout-dashboard': LayoutDashboard, pencil: Pencil, trash: Trash2".($hasNotifications ? ', bell: BellIcon }' : ' }');
 
         $bodyLines = [
             'const invue = createInvue();',
