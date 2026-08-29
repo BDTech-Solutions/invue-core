@@ -602,9 +602,26 @@ class InstallCommand extends Command
             $contents = $withImport ?? $contents;
         }
 
+        // The class_exists() check runs per-request, not at generation
+        // time — so this stays correct even if a real Panel gets created
+        // *after* invue:install ran. With exactly one Panel registered
+        // (the common case), landing on this generic placeholder instead
+        // of the real panel is exactly the "two disconnected dashboards"
+        // confusion the parent skill's plug-and-play bar exists to catch —
+        // Filament's own login always lands you inside the real panel.
+        // Multiple panels is genuinely ambiguous, so it falls through to
+        // this page same as before.
         $route = <<<'PHP'
 
         Route::middleware('auth')->get('/dashboard', function (Illuminate\Http\Request $request) {
+            if (class_exists(\Invue\Panels\PanelsServiceProvider::class)) {
+                $panels = app(\Invue\Panels\PanelManager::class)->all();
+
+                if (count($panels) === 1) {
+                    return redirect('/'.trim(array_values($panels)[0]->getPath(), '/'));
+                }
+            }
+
             return Inertia::render('Dashboard', ['user' => $request->user()]);
         })->name('dashboard');
 
