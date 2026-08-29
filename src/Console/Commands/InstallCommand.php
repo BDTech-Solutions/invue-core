@@ -747,6 +747,22 @@ class InstallCommand extends Command
 
         PHP;
 
+        // invue/core can't composer-depend on invue/notifications (wrong
+        // direction) — same runtime-detection posture as the login page's
+        // fields. Notification::flashed() is a plain session read, so a
+        // fresh page load with nothing flashed just gets an empty array;
+        // Notifications.vue already handles that (renders nothing).
+        if (class_exists(NotificationsServiceProvider::class)) {
+            $stub = str_replace(
+                "                'user' => \$request->user(),\n            ],\n",
+                "                'user' => \$request->user(),\n            ],\n".
+                "            // Ephemeral flash notifications — invue/notifications' Notifications\n".
+                "            // container reads this directly, no extra wiring needed on top.\n".
+                "            'notifications' => \\Invue\\Notifications\\Notification::flashed(),\n",
+                $stub,
+            );
+        }
+
         $this->files->ensureDirectoryExists(dirname($path));
         $this->files->put($path, $stub);
 
@@ -993,17 +1009,19 @@ class InstallCommand extends Command
         }
 
         // invue/panels can't composer-depend on invue/notifications (wrong
-        // direction), so its Topbar can only resolve the bell through the
-        // registry — never import it directly. This is the other end of
-        // that wiring: register Bell under 'panels.topbarBell' here, the
-        // same place Topbar.vue's `TopbarBell` computed looks for it, but
-        // only when invue/notifications is actually installed.
+        // direction), so its Topbar/PanelLayout can only resolve the bell
+        // and toast container through the registry — never import them
+        // directly. This is the other end of that wiring: register Bell
+        // under 'panels.topbarBell' (Topbar.vue's `TopbarBell` computed)
+        // and Notifications under 'panels.notificationsContainer'
+        // (PanelLayout.vue's `NotificationsContainer` computed) here, only
+        // when invue/notifications is actually installed.
         $hasNotifications = class_exists(NotificationsServiceProvider::class);
 
         $import = "import { createInvue } from 'invue/core';\n";
 
         if ($hasNotifications) {
-            $import .= "import { Bell as NotificationsBell } from 'invue/notifications';\n";
+            $import .= "import { Bell as NotificationsBell, Notifications } from 'invue/notifications';\n";
         }
 
         // No Lucide import here, deliberately — Icon.vue falls back to a
@@ -1023,6 +1041,7 @@ class InstallCommand extends Command
 
         if ($hasNotifications) {
             $bodyLines[] = "invue.registry.register('panels.topbarBell', NotificationsBell);";
+            $bodyLines[] = "invue.registry.register('panels.notificationsContainer', Notifications);";
         }
 
         $bodyLines[] = 'app.use(invue);';
