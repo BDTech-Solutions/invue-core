@@ -343,9 +343,9 @@ class InstallCommand extends Command
         </script>
 
         <template>
-            <div class="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-                <div class="grid w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl lg:grid-cols-2">
-                    <div class="flex flex-col justify-center p-8 sm:p-12">
+            <div class="flex min-h-screen">
+                <div class="flex w-full flex-col justify-center px-6 py-12 sm:px-12 lg:w-1/2 lg:px-16 xl:px-24">
+                    <div class="mx-auto w-full max-w-sm">
                         <h1 class="text-2xl font-semibold text-gray-900">Welcome back</h1>
                         <p class="mt-1 text-sm text-gray-500">Sign in to continue to {{ appName }}.</p>
 
@@ -363,16 +363,16 @@ class InstallCommand extends Command
                             </button>
                         </form>
                     </div>
+                </div>
 
-                    <div
-                        class="relative hidden flex-col bg-gray-950 p-10 lg:flex"
-                        style="background-image: url('/images/invue/auth-bg.png'); background-size: cover; background-position: center;"
-                    >
-                        <div class="absolute inset-0 bg-gradient-to-b from-gray-950/80 via-gray-950/10 to-gray-950/70" />
-                        <div class="relative">
-                            <p class="text-2xl font-semibold text-white">{{ appName }}</p>
-                            <p class="mt-2 max-w-xs text-sm text-gray-300">Everything you need to run things, in one place.</p>
-                        </div>
+                <div
+                    class="relative hidden w-1/2 flex-col bg-gray-950 p-10 lg:flex xl:p-16"
+                    style="background-image: url('/images/invue/auth-bg.png'); background-size: cover; background-position: center;"
+                >
+                    <div class="absolute inset-0 bg-gradient-to-b from-gray-950/80 via-gray-950/10 to-gray-950/70" />
+                    <div class="relative">
+                        <p class="text-2xl font-semibold text-white">{{ appName }}</p>
+                        <p class="mt-2 max-w-xs text-sm text-gray-300">Everything you need to run things, in one place.</p>
                     </div>
                 </div>
             </div>
@@ -401,9 +401,9 @@ class InstallCommand extends Command
         </script>
 
         <template>
-            <div class="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-                <div class="grid w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl lg:grid-cols-2">
-                    <div class="flex flex-col justify-center p-8 sm:p-12">
+            <div class="flex min-h-screen">
+                <div class="flex w-full flex-col justify-center px-6 py-12 sm:px-12 lg:w-1/2 lg:px-16 xl:px-24">
+                    <div class="mx-auto w-full max-w-sm">
                         <h1 class="text-2xl font-semibold text-gray-900">Welcome back</h1>
                         <p class="mt-1 text-sm text-gray-500">Sign in to continue to {{ appName }}.</p>
 
@@ -447,16 +447,16 @@ class InstallCommand extends Command
                             </button>
                         </form>
                     </div>
+                </div>
 
-                    <div
-                        class="relative hidden flex-col bg-gray-950 p-10 lg:flex"
-                        style="background-image: url('/images/invue/auth-bg.png'); background-size: cover; background-position: center;"
-                    >
-                        <div class="absolute inset-0 bg-gradient-to-b from-gray-950/80 via-gray-950/10 to-gray-950/70" />
-                        <div class="relative">
-                            <p class="text-2xl font-semibold text-white">{{ appName }}</p>
-                            <p class="mt-2 max-w-xs text-sm text-gray-300">Everything you need to run things, in one place.</p>
-                        </div>
+                <div
+                    class="relative hidden w-1/2 flex-col bg-gray-950 p-10 lg:flex xl:p-16"
+                    style="background-image: url('/images/invue/auth-bg.png'); background-size: cover; background-position: center;"
+                >
+                    <div class="absolute inset-0 bg-gradient-to-b from-gray-950/80 via-gray-950/10 to-gray-950/70" />
+                    <div class="relative">
+                        <p class="text-2xl font-semibold text-white">{{ appName }}</p>
+                        <p class="mt-2 max-w-xs text-sm text-gray-300">Everything you need to run things, in one place.</p>
                     </div>
                 </div>
             </div>
