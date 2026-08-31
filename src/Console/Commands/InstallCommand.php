@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Invue\Forms\FormsServiceProvider;
 use Invue\Notifications\NotificationsServiceProvider;
+use Invue\Panels\PanelManager;
 use Invue\Panels\PanelsServiceProvider;
 
 /**
@@ -47,10 +48,62 @@ class InstallCommand extends Command
         $this->installVuePlugin();
         $this->installTailwind();
 
+        $hasPanel = $this->ensurePanelScaffold();
+
         $this->line('');
-        $this->components->info('Run `php artisan make:invue-panel` next if you don\'t have one yet, then `php artisan make:invue-resource {Model}` for a real CRUD screen — see the Creating Resources page.');
+
+        if ($hasPanel) {
+            $this->components->info('Run `php artisan make:invue-resource {Model}` next for a real CRUD screen — see the Creating Resources page.');
+        } else {
+            $this->components->info('Run `php artisan make:invue-panel` next if you don\'t have one yet, then `php artisan make:invue-resource {Model}` for a real CRUD screen — see the Creating Resources page.');
+        }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Mirrors filament:install's own auto-created 'admin' panel — a fresh
+     * invue:install shouldn't leave you needing a second manual command
+     * before there's anywhere real to land after login. Skipped when
+     * invue/panels isn't installed, when a panel is already registered
+     * (nothing to do — PanelProvider::boot() already ran by the time this
+     * command executes, so app(PanelManager::class)->all() reflects any
+     * make:invue-panel run before this one), or non-interactively — same
+     * posture as ensureInertiaVueScaffold()/ensureAuthScaffold(): a real
+     * decision (a new provider file, a bootstrap/providers.php edit)
+     * that's never silently made in --no-interaction/CI.
+     *
+     * @return bool whether a panel exists by the time this returns — either
+     *              already registered, or just created. NOT re-checked via
+     *              app(PanelManager::class)->all() after make:invue-panel
+     *              runs: the new AdminPanelProvider is only appended to
+     *              bootstrap/providers.php, it never boots within this
+     *              already-running process, so the manager would still
+     *              report empty even on success.
+     */
+    protected function ensurePanelScaffold(): bool
+    {
+        if (! class_exists(PanelsServiceProvider::class)) {
+            return false;
+        }
+
+        if (app(PanelManager::class)->all() !== []) {
+            return true;
+        }
+
+        if (! $this->input->isInteractive()) {
+            return false;
+        }
+
+        $this->components->warn('No Invue panel registered yet — there\'s nowhere real to land after login.');
+
+        if (! $this->confirm('Create a default "Admin" panel now? (php artisan make:invue-panel Admin)', true)) {
+            return false;
+        }
+
+        $this->line('');
+
+        return $this->call('make:invue-panel', ['name' => 'Admin']) === self::SUCCESS;
     }
 
     protected function ensureInertiaVueScaffold(): void
@@ -525,6 +578,8 @@ class InstallCommand extends Command
 
                         <p class="mt-2 text-sm text-gray-500">
                             Run
+                            <code class="rounded bg-gray-100 px-1.5 py-0.5">php artisan make:invue-panel</code>
+                            to create one, then
                             <code class="rounded bg-gray-100 px-1.5 py-0.5">php artisan make:invue-resource {Model}</code>
                             for a real CRUD screen — see the Creating Resources page.
                         </p>
